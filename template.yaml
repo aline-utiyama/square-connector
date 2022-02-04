@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   square-connector
 
-  Sample SAM Template for square-connector
+  SAM Template for square-connector
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
@@ -38,11 +38,11 @@ Outputs:
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
   SquareConnectorApi:
-    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
+    Description: "API Gateway endpoint URL for Prod stage for Square Connector function"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/square/"
   SquareConnectorFunction:
-    Description: "Hello World Lambda Function ARN"
+    Description: "Square Connector Lambda Function ARN"
     Value: !GetAtt SquareConnectorFunction.Arn
   SquareConnectorFunctionIamRole:
-    Description: "Implicit IAM Role created for Hello World function"
+    Description: "Implicit IAM Role created for Square Connector function"
     Value: !GetAtt SquareConnectorFunctionRole.Arn

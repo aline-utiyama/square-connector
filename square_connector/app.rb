@@ -393,7 +393,7 @@ def subscription_updated(body)
     request = Net::HTTP::Put.new(url)
     request["Accept"] = 'application/json'
     request["Content-Type"] = 'application/json'
-    request["Authorization"] = 'Bearer lk_CqMHiPMf4IhfZnWE8Vg'
+    request["Authorization"] = @bm_key
     request.body = "{\"canceled_at\":\"#{canceled_at.to_time.to_i}\"}"
     
     response = http.request(request)

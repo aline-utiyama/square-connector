@@ -23,6 +23,8 @@ Resources:
         Variables:
           BM_KEY: '{{resolve:ssm:BM_KEY:1}}'
           SQUARE_KEY: '{{resolve:ssm:SQUARE_KEY:1}}'
+          WEBHOOK_SIGNATURE_KEY: '{{resolve:ssm:WEBHOOK_SIGNATURE_KEY:1}}'
+          WEBHOOK_URL: '{{resolve:ssm:WEBHOOK_URL:1}}'
       Events:
         SquareConnector:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api

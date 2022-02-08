@@ -1,3 +1,5 @@
+require 'base64'
+require 'digest/sha1'
 require 'httparty'
 require 'json'
 require 'uri'
@@ -33,31 +35,65 @@ def lambda_handler(event:, context:)
   #    raise error
   #  end
 
-   @bm_key = "Bearer #{ENV['BM_KEY']}"
-   @square_api_key = "Bearer #{ENV['SQUARE_KEY']}"
+  @bm_key = "Bearer #{ENV['BM_KEY']}"
+  @square_api_key = "Bearer #{ENV['SQUARE_KEY']}"
+  @webhook_signature_key = ENV['WEBHOOK_SIGNATURE_KEY']
+
+  # Get the JSON body and HMAC-SHA1 signature of the incoming POST request
+  callback_body = event['body']
+  callback_signature = event['headers']['X-Square-Signature']
+
+  # The URL that this server is listening on (e.g., 'http://example.com/events')
+  # Note that to receive notifications from Square, this cannot be a localhost URL
+  @webhook_url = ENV['WEBHOOK_URL']
+  puts @webhook_url
+
+  # Validate the signature
+  if !is_valid_callback(callback_body, callback_signature)
+
+	  # Fail if the signature is invalid
+    puts 'Webhook event with invalid signature detected!'
+    return
+  end
          
   if !event['body'].nil?
     body = JSON.parse(event['body'])
     puts body
     puts body['type']
 
-    case body['type']
-    when 'customer.created'
-      customer_created(body)
-    when 'customer.updated'
-      customer_updated(body)
-    when 'customer.deleted'
-      customer_deleted(body)
-    when 'catalog.version.updated'
-      catalog_version_updated
-    when 'subscription.created'
-      subscription_created(body)
-    when 'subscription.updated'
-      subscription_updated(body)
+    if body.has_key?('type')
+      case body['type']
+      when 'customer.created'
+        customer_created(body)
+      when 'customer.updated'
+        customer_updated(body)
+      when 'customer.deleted'
+        customer_deleted(body)
+      when 'catalog.version.updated'
+        catalog_version_updated
+      when 'subscription.created'
+        subscription_created(body)
+      when 'subscription.updated'
+        subscription_updated(body)
+      end
     end
   end
   
   { statusCode: 200, body: JSON.generate('Ok') }
+end
+
+# Validates HMAC-SHA1 signatures included in webhook notifications to ensure notifications came from Square
+def is_valid_callback(callback_body, callback_signature)
+
+  # Combine your webhook notification URL and the JSON body of the incoming request into a single string
+  string_to_sign = @webhook_url + callback_body
+
+  # Generate the HMAC-SHA1 signature of the string, signed with your webhook signature key
+  string_signature = Base64.strict_encode64(OpenSSL::HMAC.digest('sha1', @webhook_signature_key, string_to_sign))
+
+  # Hash the signatures a second time (to protect against timing attacks)
+  # and compare them
+  return Digest::SHA1.base64digest(string_signature) == Digest::SHA1.base64digest(callback_signature)
 end
 
 def customer_created(body)

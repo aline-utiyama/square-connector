@@ -217,9 +217,6 @@ def catalog_version_updated
         
         trial_cadence = phase['cadence']
         
-        #puts "Trial duration:: #{trial_periods}"
-        #puts "Trial duration unit:: #{trial_cadence}"
-        
         case trial_cadence
         when "DAILY"
             trial_duration_unit = "day"
@@ -240,12 +237,21 @@ def catalog_version_updated
         cadence = phase['cadence']
           
         case cadence
-        when "MONTHLY"
-            interval = "month"
-            interval_count = 1
         when "WEEKLY"
             interval = 'day'
             interval_count = 7
+        when "EVERY_TWO_WEEKS"
+            interval = 'day'
+            interval_count = 14
+        when "MONTHLY"
+            interval = "month"
+            interval_count = 1
+        when "QUARTERLY"
+            interval = "month"
+            interval_count = 3
+        when "EVERY_SIX_MONTHS"
+            interval = "month"
+            interval_count = 6
         when "ANNUAL"
             interval = 'year'
             interval_count = 1

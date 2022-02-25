@@ -37,6 +37,8 @@ def lambda_handler(event:, context:)
 
   @bm_key = "Bearer #{ENV['BM_KEY']}"
   @square_api_key = "Bearer #{ENV['SQUARE_KEY']}"
+  @square_url = "#{ENV['SQUARE_URL']}"
+  @bm_source_id = ENV['BM_SOURCE_ID']
   @webhook_signature_key = ENV['WEBHOOK_SIGNATURE_KEY']
 
   # Get the JSON body and HMAC-SHA1 signature of the incoming POST request
@@ -46,7 +48,6 @@ def lambda_handler(event:, context:)
   # The URL that this server is listening on (e.g., 'http://example.com/events')
   # Note that to receive notifications from Square, this cannot be a localhost URL
   @webhook_url = ENV['WEBHOOK_URL']
-  puts @webhook_url
 
   # Validate the signature
   if !is_valid_callback(callback_body, callback_signature)
@@ -58,8 +59,6 @@ def lambda_handler(event:, context:)
          
   if !event['body'].nil?
     body = JSON.parse(event['body'])
-    puts body
-    puts body['type']
 
     if body.has_key?('type')
       case body['type']
@@ -104,8 +103,8 @@ def customer_created(body)
   created = customer['created_at']
   created_at = Date.parse(created)
   
-  puts "Creating"
-  url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/customers")
+  puts "Creating customer..."
+  url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/customers")
   
   http = Net::HTTP.new(url.host, url.port)
   http.use_ssl = true
@@ -118,7 +117,12 @@ def customer_created(body)
   
   response = http.request(request)
   puts response.read_body
-  puts "I am created"
+
+  if response.is_a?(Net::HTTPOK)
+    puts " Customer created!"
+  else
+    puts "Something Wrong..."
+  end
 end
 
 def customer_updated(body)
@@ -129,9 +133,9 @@ def customer_updated(body)
   created = customer['created_at']
   created_at = Date.parse(created)
   
-  puts "Updating..."
+  puts "Updating customer..."
   
-  url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/customers/#{oid}")
+  url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/customers/#{oid}")
 
   http = Net::HTTP.new(url.host, url.port)
   http.use_ssl = true
@@ -145,28 +149,68 @@ def customer_updated(body)
   response = http.request(request)
   puts response.read_body
 
-  if response.is_a?(Net::HTTPNotFound)
+  if response.is_a?(Net::HTTPOK)
+    puts "Customer updated!"
+  elsif response.is_a?(Net::HTTPNotFound)
     customer_created(body)
+  else
+    puts "Something Wrong..."
   end
 end
 
 def customer_deleted(body)
   customer = body['data']['object']['customer']
   oid = customer['id']
-  
-  puts "Deleting..."
-  url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/customers/#{oid}")
+
+  #Check if customer has subscription
+
+  url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/subscriptions?customer_oid=#{oid}")
 
   http = Net::HTTP.new(url.host, url.port)
   http.use_ssl = true
-  
-  request = Net::HTTP::Delete.new(url)
+
+  request = Net::HTTP::Get.new(url)
   request["Accept"] = 'application/json'
   request["Authorization"] = @bm_key
-  
+
   response = http.request(request)
   puts response.read_body
-  puts " I was deleted"
+
+  if response.is_a?(Net::HTTPOK)
+    
+    bm_body = JSON.parse(response.read_body)
+
+    bm_customer_subscriptions = bm_body['subscriptions']
+
+    if !bm_customer_subscriptions.empty?
+      bm_customer_subscriptions.each do |subscription|
+        puts subscription['oid']
+        deleted_subscription(subscription['oid'])
+      end
+    end
+
+    puts "Deleting customer..."
+    url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/customers/#{oid}")
+
+    http = Net::HTTP.new(url.host, url.port)
+    http.use_ssl = true
+    
+    request = Net::HTTP::Delete.new(url)
+    request["Accept"] = 'application/json'
+    request["Authorization"] = @bm_key
+    
+    response = http.request(request)
+    puts response.read_body
+    puts response
+
+    if response.is_a?(Net::HTTPAccepted)
+      puts "Customer deleted."
+    else
+      puts "Something Wrong..."
+    end
+  else
+    puts "Something Wrong..."
+  end
 end
 
 def catalog_version_updated
@@ -174,10 +218,9 @@ def catalog_version_updated
   puts "Catalog Version Updated"
   
   bm_plans_id_list
-  puts @bm_plan_ids
   
   # List Square Plans
-  url = URI("https://connect.squareupsandbox.com/v2/catalog/list")
+  url = URI("#{@square_url}/v2/catalog/list")
 
   http = Net::HTTP.new(url.host, url.port)
   http.use_ssl = true
@@ -188,14 +231,10 @@ def catalog_version_updated
   request["Authorization"] = @square_api_key
   
   response = http.request(request)
-  puts "Body:: #{response.read_body}"
   body = JSON.parse(response.read_body)
-  
-  puts body['objects'].count
   
   body['objects'].each do |value|
     
-    puts value['id']
     plan_oid = value['id']
     plan_name = value['subscription_plan_data']['name']
     trial_duration = 0
@@ -259,54 +298,41 @@ def catalog_version_updated
       end
     end
     
-    puts @bm_plan_ids.include?(plan_oid)
-    
+    #Create plan if doesnt exist
     if !@bm_plan_ids.include?(plan_oid)
-      #plan doesnt exists
-      puts "plan_name:: #{plan_name}"
-      puts "plan_oid:: #{plan_oid}"
-      puts "Amount:: #{amount}"
-      puts "Currency:: #{currency}"
-      puts "Interval:: #{interval}"
-      puts "Interval count:: #{interval_count}"
-      puts "trial_duration:: #{trial_duration}"
-      #puts "Is blank:: #{trial_duration.zero? || trial_duration.nil}"
-      puts "trial_duration_unit:: #{trial_duration_unit}"
       
-      
-      puts "plan_name:: #{plan_name} Started!"
-      url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/plans")
+      url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/plans")
 
       http = Net::HTTP.new(url.host, url.port)
       http.use_ssl = true
-      puts "plan_name:: #{plan_name} Started2!"
+      
       request = Net::HTTP::Post.new(url)
       request["Accept"] = 'application/json'
       request["Content-Type"] = 'application/json'
       request["Authorization"] = @bm_key
       
       if trial_duration.zero? || trial_duration.nil?
-          puts "plan_name:: #{plan_name} 0!"
+          puts "#{plan_name} Doesnt have trial period."
           request.body = "{\"oid\":\"#{plan_oid}\",\"name\":\"#{plan_name}\",\"currency\":\"#{currency}\",\"amount\":#{amount},\"interval\":\"#{interval}\",\"interval_count\":#{interval_count}}"
       else
-          puts "plan_name:: #{plan_name} 1!"
+          puts "#{plan_name} Have trial period!"
           request.body = "{\"trial_duration\":#{trial_duration},\"trial_duration_unit\":\"day\",\"oid\":\"#{plan_oid}\",\"name\":\"#{plan_name}\",\"currency\":\"#{currency}\",\"amount\":#{amount},\"interval\":\"#{interval}\",\"interval_count\":#{interval_count}}"
       end
       
-      puts "plan_name:: #{plan_name} Started3!"
-      puts "Request:: #{request}"
       response = http.request(request)
-      puts "Body response1:: #{response}"
-      puts "Body response:: #{response.read_body.force_encoding("utf-8")}"
+      puts response.read_body.force_encoding("utf-8")
+
+      if response.is_a?(Net::HTTPOK)
+        puts "Plan created!"
+      else
+        puts "Something Wrong..."
+      end 
     else
       bm_plan = @bm_plans_list.find {|key| key['oid'] == plan_oid}
       
-      puts bm_plan.class
-      puts bm_plan['name']
-      
       if plan_name != bm_plan['name']
-        puts "name not equal"
-        url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/plans/#{plan_oid}")
+        puts "Name not equal."
+        url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/plans/#{plan_oid}")
 
         http = Net::HTTP.new(url.host, url.port)
         http.use_ssl = true
@@ -319,9 +345,14 @@ def catalog_version_updated
         
         response = http.request(request)
         puts response.read_body
-        puts "plan name updated"
+        
+        if response.is_a?(Net::HTTPOK)
+          puts "Plan name updated!"
+        else
+          puts "Something Wrong..."
+        end 
       else
-        puts "name equal"
+        puts "Name equal."
       end
     end
   end
@@ -331,7 +362,7 @@ def bm_plans_id_list
   @bm_plan_ids = []
   @bm_plans_hash = {}
   
-  url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/plans")
+  url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/plans")
 
   http = Net::HTTP.new(url.host, url.port)
   http.use_ssl = true
@@ -341,10 +372,9 @@ def bm_plans_id_list
   request["Authorization"] = @bm_key
   
   response = http.request(request)
-  #puts "BM Plans list response:: #{response.read_body.force_encoding('UTF-8')}"
   
   body = JSON.parse(response.read_body)
-  #puts "BM Plans list body:: #{body}"
+  
   body['plans'].each do |plan|
     @bm_plan_ids << plan['oid']
   end
@@ -354,10 +384,9 @@ def bm_plans_id_list
 end
 
 def subscription_created(body)
-  puts "Subscription Created"
+  puts "Creating Subscription..."
   
-  puts subscription = body['data']['object']['subscription']
-  puts subscription['id']
+  subscription = body['data']['object']['subscription']
   
   oid = subscription['id']
   plan_oid = subscription['plan_id']
@@ -373,13 +402,7 @@ def subscription_created(body)
     active = false
   end
   
-  puts "Oid:: #{oid}"
-  puts "PlanOid:: #{plan_oid}"
-  puts "CustomerOid:: #{customer_oid}"
-  puts "StartedDate:: #{started_date}"
-  puts "STatus:: #{active}"
-  
-  url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/subscriptions")
+  url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/subscriptions")
 
   http = Net::HTTP.new(url.host, url.port)
   http.use_ssl = true
@@ -392,20 +415,23 @@ def subscription_created(body)
   
   response = http.request(request)
   puts response.read_body
+
+  if response.is_a?(Net::HTTPOK)
+    puts "Subscription Created!"
+  else
+    puts "Something Wrong..."
+  end
 end
 
 def subscription_updated(body)
-  puts "I was updated!"
+  puts "Updating subscription..."
   
   # Retreive the updated subscription
   subscription = body['data']['object']['subscription']
   subscription_id = subscription['id']
   plan_id = subscription['plan_id']
   
-  puts "Subscription id:: #{subscription_id}"
-  puts "Plan id:: #{plan_id}"
-  
-  url = URI("https://connect.squareupsandbox.com/v2/subscriptions/#{subscription_id}")
+  url = URI("#{@square_url}/v2/subscriptions/#{subscription_id}")
 
   http = Net::HTTP.new(url.host, url.port)
   http.use_ssl = true
@@ -416,18 +442,14 @@ def subscription_updated(body)
   request["Authorization"] = @square_api_key
   
   response = http.request(request)
-  puts response.read_body
   
   sub_body = JSON.parse(response.read_body)
-  puts "SubsInfo #{sub_body['subscription']}"
-  puts "SubsCanceled #{subscription['canceled_date']}"
   
   if subscription['canceled_date']
     canceled = subscription['canceled_date']
     canceled_at = Date.parse(canceled)
-    puts "Subscription canceled:: #{canceled_at.to_time.to_i}"
     
-    url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/subscriptions/#{subscription_id}/cancel")
+    url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/subscriptions/#{subscription_id}/cancel")
 
     http = Net::HTTP.new(url.host, url.port)
     http.use_ssl = true
@@ -440,9 +462,15 @@ def subscription_updated(body)
     
     response = http.request(request)
     puts response.read_body
+
+    if response.is_a?(Net::HTTPOK)
+      puts "Subscription canceled!"
+    else
+      puts "Something Wrong..."
+    end
   else
-    # Get the data and sent it to BM
-    url = URI("https://api.baremetrics.com/v1/82145757-9f4b-46e3-b67b-0bbf8632d0dd/subscriptions/#{subscription_id}")
+    # If it doesnt exist, create it.
+    url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/subscriptions/#{subscription_id}")
   
     http = Net::HTTP.new(url.host, url.port)
     http.use_ssl = true
@@ -454,16 +482,36 @@ def subscription_updated(body)
     request.body = "{\"occurred_at\":\"NOW\",\"quantity\":1,\"plan_oid\":\"#{plan_id}\"}"
     
     response = http.request(request)
-    
-    puts response.code
-    puts response.code.class
-    
-    if response.code == "404"
-      puts "not found!!!!!!!"
+
+    if response.is_a?(Net::HTTPOK)
+      puts response.read_body
+    elsif response.is_a?(Net::HTTPNotFound)
+      puts "Not found. Create subscription..."
       subscription_created(body)
     else
-      puts "found"
-      puts response.read_body
+      puts "Something Wrong..."
     end
+  end
+end
+
+def deleted_subscription(id)
+  puts "Deleting subscription..."
+
+  url = URI("https://api.baremetrics.com/v1/#{@bm_source_id}/subscriptions/#{id}")
+
+  http = Net::HTTP.new(url.host, url.port)
+  http.use_ssl = true
+
+  request = Net::HTTP::Delete.new(url)
+  request["Accept"] = 'application/json'
+  request["Authorization"] = @bm_key
+
+  response = http.request(request)
+  puts response.read_body
+  puts response
+  if response.is_a?(Net::HTTPAccepted)
+    puts "Subscription deleted!"
+  else
+    puts "Something Wrong..."
   end
 end

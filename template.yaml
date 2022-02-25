@@ -8,7 +8,7 @@ Description: >
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 3
+    Timeout: 600
 
 Resources:
   SquareConnectorFunction:
@@ -23,6 +23,8 @@ Resources:
         Variables:
           BM_KEY: '{{resolve:ssm:BM_KEY:1}}'
           SQUARE_KEY: '{{resolve:ssm:SQUARE_KEY:1}}'
+          SQUARE_URL: '{{resolve:ssm:SQUARE_URL:1}}'
+          BM_SOURCE_ID: '{{resolve:ssm:BM_SOURCE_ID:1}}'
           WEBHOOK_SIGNATURE_KEY: '{{resolve:ssm:WEBHOOK_SIGNATURE_KEY:1}}'
           WEBHOOK_URL: '{{resolve:ssm:WEBHOOK_URL:1}}'
       Events:
